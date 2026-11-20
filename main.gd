@@ -12,16 +12,19 @@ const SUN_STRIP_COUNT = 11
 # Colores del paisaje y la carretera
 const MOUNTAIN_FAR_COLOR = Color("#8879ae")
 const MOUNTAIN_NEAR_COLOR = Color("#5a4b78")
-const GROUND_COLOR = Color("#4e7049")
-const ROAD_EDGE_LIGHT = Color("#f6d99a")
-const ROAD_EDGE_DARK = Color("#cf5549")
-const ROAD_COLOR_A = Color("#353746")
-const ROAD_COLOR_B = Color("#3d3d4b")
-const ROAD_MARKER_COLOR = Color("#fff0c2")
-const ROAD_SEGMENT_COUNT = 48
-const ROAD_SCROLL_SPEED = 7.0
-const ROAD_CURVE_SPEED = 0.22
-const ROAD_CURVE_AMPLITUDE = 0.14
+const GROUND_COLOR_A = Color("#248a65")
+const GROUND_COLOR_B = Color("#147256")
+const ROAD_EDGE_LIGHT = Color("#fff0ba")
+const ROAD_EDGE_DARK = Color("#ef5c55")
+const ROAD_COLOR_A = Color("#36364c")
+const ROAD_COLOR_B = Color("#2a2c40")
+const ROAD_MARKER_COLOR = Color("#fff7d6")
+const PALM_LEAF_COLOR = Color("#173f47")
+const PALM_HIGHLIGHT_COLOR = Color("#276654")
+const PALM_TRUNK_COLOR = Color("#633d38")
+const ROAD_SEGMENT_COUNT = 72
+const ROAD_CURVE_SPEED = 0.14
+const ROAD_CURVE_AMPLITUDE = 0.19
 
 # Colores del auto
 const CAR_BODY_COLOR = Color("#d82f32")
@@ -32,13 +35,13 @@ const CAR_LIGHT_COLOR = Color("#ffe689")
 const TRAFFIC_COLORS = ["#48b8d0", "#f2c14e", "#72b36b", "#a56cc1"]
 const TRAFFIC_LANES = [-0.62, -0.22, 0.22, 0.62]
 const MAX_TRAFFIC_CARS = 5
-const MAX_SPEED = 240.0
+const MAX_SPEED = 300.0
 const TOUCH_BUTTON_RADIUS = 42.0
 
-var road_scroll = 0.0
+var road_distance = 0.0
 var curve_phase = 0.0
 var player_lateral_position = 0.0
-var game_speed = 0.35
+var game_speed = 0.52
 var score = 0.0
 var traffic_cars = []
 var traffic_spawn_timer = 1.0
@@ -66,7 +69,7 @@ func _input(event):
 func _process(delta):
 	_update_player(delta)
 	_update_traffic(delta)
-	road_scroll = fposmod(road_scroll + delta * ROAD_SCROLL_SPEED * (0.25 + game_speed), float(ROAD_SEGMENT_COUNT))
+	road_distance = fposmod(road_distance + delta * lerpf(0.11, 0.64, game_speed), 1.0)
 	curve_phase = fposmod(curve_phase + delta * ROAD_CURVE_SPEED, TAU)
 	score += delta * game_speed * 180.0
 	collision_cooldown = maxf(0.0, collision_cooldown - delta)
@@ -85,15 +88,15 @@ func _update_player(delta):
 	var accelerating = Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W) or _is_touch_action_active("accelerate")
 	var braking = Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S) or _is_touch_action_active("brake")
 	if accelerating:
-		game_speed = move_toward(game_speed, 1.0, delta * 0.38)
+		game_speed = move_toward(game_speed, 1.0, delta * 0.62)
 	elif braking:
-		game_speed = move_toward(game_speed, 0.0, delta * 0.72)
+		game_speed = move_toward(game_speed, 0.0, delta * 1.05)
 	else:
-		game_speed = move_toward(game_speed, 0.35, delta * 0.06)
+		game_speed = move_toward(game_speed, 0.52, delta * 0.12)
 
 	# Circular por fuera de la calzada reduce la velocidad.
 	if absf(player_lateral_position) > 0.78:
-		game_speed = move_toward(game_speed, 0.2, delta * 0.7)
+		game_speed = move_toward(game_speed, 0.22, delta * 0.9)
 
 
 func _update_traffic(delta):
@@ -172,18 +175,11 @@ func _draw():
 		Rect2(0, horizon, screen_size.x, screen_size.y * 0.055),
 		HORIZON_COLOR
 	)
-	draw_rect(
-		Rect2(
-			0,
-			horizon + screen_size.y * 0.055,
-			screen_size.x,
-			screen_size.y - horizon - screen_size.y * 0.055
-		),
-		GROUND_COLOR
-	)
+	draw_rect(Rect2(0, horizon + screen_size.y * 0.055, screen_size.x, screen_size.y - horizon), GROUND_COLOR_A)
 
 	_draw_mountains(screen_size, horizon)
 	_draw_road(screen_size, horizon)
+	_draw_roadside_palms(screen_size, horizon)
 	_draw_traffic(screen_size, horizon)
 	_draw_player_car(screen_size)
 	_draw_hud(screen_size)
@@ -288,52 +284,62 @@ func _draw_mountain_layer(peaks, base_y, screen_size, color):
 
 
 func _draw_road(screen_size, horizon):
-	for segment_index in range(ROAD_SEGMENT_COUNT):
-		var depth_top = pow(float(segment_index) / ROAD_SEGMENT_COUNT, 2.0)
-		var depth_bottom = pow(float(segment_index + 1) / ROAD_SEGMENT_COUNT, 2.0)
-		var y_top = lerpf(horizon, screen_size.y, depth_top)
-		var y_bottom = lerpf(horizon, screen_size.y, depth_bottom)
-		var center_top = _road_center_x(depth_top, screen_size.x)
-		var center_bottom = _road_center_x(depth_bottom, screen_size.x)
-		var half_width_top = _road_half_width(depth_top, screen_size.x)
-		var half_width_bottom = _road_half_width(depth_bottom, screen_size.x)
-		var edge_top = lerpf(2.0, screen_size.x * 0.022, depth_top)
-		var edge_bottom = lerpf(2.0, screen_size.x * 0.022, depth_bottom)
-		var moving_index = segment_index + int(road_scroll)
-		var edge_group = int(floor(float(moving_index) / 6.0))
-		var edge_color = ROAD_EDGE_LIGHT if edge_group % 2 == 0 else ROAD_EDGE_DARK
-		var road_group = int(floor(float(moving_index) / 3.0))
-		var road_color = ROAD_COLOR_A if road_group % 2 == 0 else ROAD_COLOR_B
+	var first_segment = int(ceil((1.0 - road_distance) * ROAD_SEGMENT_COUNT)) % ROAD_SEGMENT_COUNT
 
+	# Los segmentos se ordenan de horizonte a cámara. La profundidad cambia cada
+	# cuadro, por eso el patrón se acerca al jugador en vez de solo alternar color.
+	for draw_index in range(ROAD_SEGMENT_COUNT):
+		var world_segment = (first_segment + draw_index) % ROAD_SEGMENT_COUNT
+		var depth_top = fposmod(float(world_segment) / ROAD_SEGMENT_COUNT + road_distance, 1.0)
+		var depth_bottom = 1.0 if draw_index == ROAD_SEGMENT_COUNT - 1 else fposmod(float(world_segment + 1) / ROAD_SEGMENT_COUNT + road_distance, 1.0)
+		_draw_road_segment(screen_size, horizon, depth_top, depth_bottom, world_segment)
+
+
+func _draw_road_segment(screen_size, horizon, depth_top, depth_bottom, world_segment):
+	var perspective_top = pow(depth_top, 2.15)
+	var perspective_bottom = pow(depth_bottom, 2.15)
+	var y_top = lerpf(horizon, screen_size.y, perspective_top)
+	var y_bottom = lerpf(horizon, screen_size.y, perspective_bottom)
+	var center_top = _road_center_x(depth_top, screen_size.x)
+	var center_bottom = _road_center_x(depth_bottom, screen_size.x)
+	var half_width_top = _road_half_width(depth_top, screen_size.x)
+	var half_width_bottom = _road_half_width(depth_bottom, screen_size.x)
+	var edge_top = lerpf(2.0, screen_size.x * 0.029, perspective_top)
+	var edge_bottom = lerpf(2.0, screen_size.x * 0.029, perspective_bottom)
+	var stripe_group = int(floor(float(world_segment) / 3.0))
+	var edge_color = ROAD_EDGE_LIGHT if stripe_group % 2 == 0 else ROAD_EDGE_DARK
+	var grass_color = GROUND_COLOR_A if stripe_group % 2 == 0 else GROUND_COLOR_B
+	var road_color = ROAD_COLOR_A if int(floor(float(world_segment) / 2.0)) % 2 == 0 else ROAD_COLOR_B
+
+	# Franjas de césped y de borde: mantienen el contraste al subir la velocidad.
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(0, y_top), Vector2(screen_size.x, y_top),
+			Vector2(screen_size.x, y_bottom), Vector2(0, y_bottom)
+		]),
+		grass_color
+	)
+	_draw_road_quad(center_top, center_bottom, half_width_top + edge_top, half_width_bottom + edge_bottom, y_top, y_bottom, edge_color)
+	_draw_road_quad(center_top, center_bottom, half_width_top, half_width_bottom, y_top, y_bottom, road_color)
+
+	if world_segment % 12 < 6:
 		_draw_road_quad(
 			center_top, center_bottom,
-			half_width_top + edge_top, half_width_bottom + edge_bottom,
-			y_top, y_bottom, edge_color
+			half_width_top * 0.018, half_width_bottom * 0.018,
+			y_top, y_bottom, ROAD_MARKER_COLOR
 		)
-		_draw_road_quad(
-			center_top, center_bottom,
-			half_width_top, half_width_bottom,
-			y_top, y_bottom, road_color
-		)
-
-		# Línea discontinua central que también se estrecha con la perspectiva.
-		if moving_index % 8 < 4:
-			_draw_road_quad(
-				center_top, center_bottom,
-				half_width_top * 0.018, half_width_bottom * 0.018,
-				y_top, y_bottom, ROAD_MARKER_COLOR
-			)
 
 
 func _road_center_x(depth, screen_width):
-	var curve_depth = 1.0 - depth
-	var bend = sin(curve_phase + curve_depth * 2.4)
-	return screen_width * 0.5 + bend * screen_width * ROAD_CURVE_AMPLITUDE * curve_depth
+	var horizon_bend = sin(curve_phase) * ROAD_CURVE_AMPLITUDE
+	var near_bend = sin(curve_phase * 0.54 + 1.15) * ROAD_CURVE_AMPLITUDE * 0.34
+	var bend = lerpf(horizon_bend, near_bend, pow(depth, 1.65))
+	return screen_width * (0.5 + bend)
 
 
 func _road_half_width(depth, screen_width):
-	var perspective = pow(depth, 1.15)
-	return lerpf(screen_width * 0.025, screen_width * 0.44, perspective)
+	var perspective = pow(depth, 1.28)
+	return lerpf(screen_width * 0.018, screen_width * 0.49, perspective)
 
 
 func _draw_road_quad(center_top, center_bottom, half_top, half_bottom, y_top, y_bottom, color):
@@ -348,13 +354,62 @@ func _draw_road_quad(center_top, center_bottom, half_top, half_bottom, y_top, y_
 	)
 
 
+func _draw_roadside_palms(screen_size, horizon):
+	# Pocos objetos grandes venden más la profundidad que muchos sprites pequeños.
+	for palm_index in range(12):
+		var world_depth = fposmod(float(palm_index) * 0.173 + road_distance * 0.93, 1.0)
+		var side = -1.0 if palm_index % 2 == 0 else 1.0
+		_draw_palm(screen_size, horizon, world_depth, side, palm_index)
+
+
+func _draw_palm(screen_size, horizon, depth, side, palm_index):
+	var perspective = pow(depth, 2.0)
+	var base_y = lerpf(horizon + 13.0, screen_size.y * 0.98, perspective)
+	var road_center = _road_center_x(depth, screen_size.x)
+	var road_half_width = _road_half_width(depth, screen_size.x)
+	var roadside_gap = lerpf(screen_size.x * 0.035, screen_size.x * 0.21, perspective)
+	var base_x = road_center + side * (road_half_width + roadside_gap)
+	var tree_height = lerpf(8.0, screen_size.y * 0.34, pow(depth, 1.3))
+	var crown_center = Vector2(base_x - side * tree_height * 0.08, base_y - tree_height)
+	var trunk_width = maxf(2.0, tree_height * 0.105)
+	var lean = side * (0.15 + sin(float(palm_index) * 1.7) * 0.06)
+
+	# Tronco ancho y ligeramente inclinado.
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(base_x - trunk_width * 0.5, base_y),
+			Vector2(base_x + trunk_width * 0.5, base_y),
+			Vector2(crown_center.x + trunk_width * 0.32 + lean * tree_height, crown_center.y + tree_height * 0.12),
+			Vector2(crown_center.x - trunk_width * 0.32 + lean * tree_height, crown_center.y + tree_height * 0.12)
+		]),
+		PALM_TRUNK_COLOR
+	)
+
+	# Hojas en abanico. A distancia se reducen a una silueta sin costo de texturas.
+	var leaf_count = 7
+	for leaf_index in range(leaf_count):
+		var angle = lerpf(-2.72, -0.42, float(leaf_index) / float(leaf_count - 1))
+		var leaf_length = tree_height * (0.33 + (leaf_index % 2) * 0.05)
+		var tip = crown_center + Vector2(cos(angle), sin(angle)) * leaf_length
+		var leaf_color = PALM_HIGHLIGHT_COLOR if leaf_index % 2 == 0 else PALM_LEAF_COLOR
+		draw_colored_polygon(
+			PackedVector2Array([
+				crown_center,
+				crown_center + Vector2(cos(angle - 0.15), sin(angle - 0.15)) * leaf_length * 0.28,
+				tip,
+				crown_center + Vector2(cos(angle + 0.15), sin(angle + 0.15)) * leaf_length * 0.28
+			]),
+			leaf_color
+		)
+
+
 func _draw_traffic(screen_size, horizon):
 	for traffic_car in traffic_cars:
 		var depth = float(traffic_car["depth"])
 		var road_depth = depth * depth
 		var base_y = lerpf(horizon + 8.0, screen_size.y * 0.92, road_depth)
-		var road_center = _road_center_x(road_depth, screen_size.x)
-		var road_half_width = _road_half_width(road_depth, screen_size.x)
+		var road_center = _road_center_x(depth, screen_size.x)
+		var road_half_width = _road_half_width(depth, screen_size.x)
 		var center_x = road_center + float(traffic_car["lane"]) * road_half_width * 0.82
 		var car_width = lerpf(screen_size.x * 0.012, screen_size.x * 0.09, depth)
 		var car_height = car_width * 0.74
@@ -394,27 +449,28 @@ func _draw_hud(screen_size):
 	var score_text = "PUNTOS %07d" % int(score)
 	var speed_text = "%03d KM/H" % int(game_speed * MAX_SPEED)
 
-	draw_rect(Rect2(12, 12, 250, 42), Color(0.08, 0.09, 0.16, 0.72))
-	draw_rect(Rect2(screen_size.x - 220, 12, 208, 42), Color(0.08, 0.09, 0.16, 0.72))
-	draw_string(font, Vector2(24, 40), score_text, HORIZONTAL_ALIGNMENT_LEFT, 230, 22, text_color)
-	draw_string(font, Vector2(screen_size.x - 22, 40), speed_text, HORIZONTAL_ALIGNMENT_RIGHT, 190, 22, text_color)
+	draw_rect(Rect2(16, 16, 228, 36), Color(0.10, 0.08, 0.20, 0.8))
+	draw_rect(Rect2(screen_size.x - 214, 16, 198, 36), Color(0.10, 0.08, 0.20, 0.8))
+	draw_rect(Rect2(16, 52, 228 * game_speed, 4), Color("#ffcf63"))
+	draw_string(font, Vector2(28, 40), score_text, HORIZONTAL_ALIGNMENT_LEFT, 210, 19, text_color)
+	draw_string(font, Vector2(screen_size.x - 28, 40), speed_text, HORIZONTAL_ALIGNMENT_RIGHT, 174, 19, text_color)
 	draw_string(
 		font,
-		Vector2(screen_size.x * 0.5 - 155, 40),
-		"OUTRUN RETRO",
+		Vector2(screen_size.x * 0.5 - 155, 42),
+		"SUNSET RUN",
 		HORIZONTAL_ALIGNMENT_CENTER,
 		310,
-		22,
-		Color("#ffdc89")
+		24,
+		Color("#ffe08c")
 	)
 	draw_string(
 		font,
-		Vector2(screen_size.x * 0.5 - 270, 70),
-		"A/D o flechas: girar     W/S o flechas: acelerar/frenar",
+		Vector2(screen_size.x * 0.5 - 270, 66),
+		"FLECHAS / WASD   ·   TOCA LOS CONTROLES",
 		HORIZONTAL_ALIGNMENT_CENTER,
 		540,
-		15,
-		text_color
+		13,
+		Color(1.0, 0.96, 0.84, 0.82)
 	)
 
 
@@ -456,65 +512,72 @@ func _draw_collision_flash(screen_size):
 
 
 func _draw_player_car(screen_size):
-	var car_width = screen_size.x * 0.115
-	var car_height = screen_size.y * 0.18
-	var car_center_x = screen_size.x * 0.5 + player_lateral_position * screen_size.x * 0.34
-	var car_bottom = screen_size.y * 0.965
+	var car_width = screen_size.x * 0.165
+	var car_height = screen_size.y * 0.245
+	var road_center = _road_center_x(0.94, screen_size.x)
+	var car_center_x = road_center + player_lateral_position * screen_size.x * 0.31
+	var car_bottom = screen_size.y * 0.975
 	var car_top = car_bottom - car_height
+	var speed_shake = sin(road_distance * TAU * 28.0) * game_speed * 2.0
+	car_center_x += speed_shake
 
-	# Sombra y ruedas, detrás de la carrocería.
+	# Sombra proyectada, ruedas y alerón trasero.
 	draw_colored_polygon(
 		PackedVector2Array([
-			Vector2(car_center_x - car_width * 0.48, car_bottom - car_height * 0.06),
-			Vector2(car_center_x - car_width * 0.34, car_bottom - car_height * 0.16),
-			Vector2(car_center_x + car_width * 0.34, car_bottom - car_height * 0.16),
-			Vector2(car_center_x + car_width * 0.48, car_bottom - car_height * 0.06)
+			Vector2(car_center_x - car_width * 0.57, car_bottom - car_height * 0.03),
+			Vector2(car_center_x - car_width * 0.30, car_bottom - car_height * 0.12),
+			Vector2(car_center_x + car_width * 0.30, car_bottom - car_height * 0.12),
+			Vector2(car_center_x + car_width * 0.57, car_bottom - car_height * 0.03),
+			Vector2(car_center_x + car_width * 0.30, car_bottom + car_height * 0.025),
+			Vector2(car_center_x - car_width * 0.30, car_bottom + car_height * 0.025)
 		]),
-		Color("#262334")
+		Color(0.06, 0.05, 0.10, 0.58)
 	)
-	draw_rect(
-		Rect2(car_center_x - car_width * 0.48, car_top + car_height * 0.48, car_width * 0.14, car_height * 0.34),
-		CAR_TIRE_COLOR
-	)
-	draw_rect(
-		Rect2(car_center_x + car_width * 0.34, car_top + car_height * 0.48, car_width * 0.14, car_height * 0.34),
-		CAR_TIRE_COLOR
-	)
+	draw_rect(Rect2(car_center_x - car_width * 0.51, car_top + car_height * 0.52, car_width * 0.13, car_height * 0.35), CAR_TIRE_COLOR)
+	draw_rect(Rect2(car_center_x + car_width * 0.38, car_top + car_height * 0.52, car_width * 0.13, car_height * 0.35), CAR_TIRE_COLOR)
+	draw_rect(Rect2(car_center_x - car_width * 0.38, car_top + car_height * 0.45, car_width * 0.76, car_height * 0.06), Color("#4b2330"))
+	draw_rect(Rect2(car_center_x - car_width * 0.45, car_top + car_height * 0.41, car_width * 0.12, car_height * 0.045), CAR_BODY_COLOR)
+	draw_rect(Rect2(car_center_x + car_width * 0.33, car_top + car_height * 0.41, car_width * 0.12, car_height * 0.045), CAR_BODY_COLOR)
 
-	# Silueta trasera del deportivo.
+	# Carrocería ancha, con guardabarros y cintura baja.
 	draw_colored_polygon(
 		PackedVector2Array([
-			Vector2(car_center_x - car_width * 0.48, car_bottom),
-			Vector2(car_center_x - car_width * 0.43, car_top + car_height * 0.54),
-			Vector2(car_center_x - car_width * 0.32, car_top + car_height * 0.25),
+			Vector2(car_center_x - car_width * 0.50, car_bottom),
+			Vector2(car_center_x - car_width * 0.47, car_top + car_height * 0.59),
+			Vector2(car_center_x - car_width * 0.34, car_top + car_height * 0.37),
 			Vector2(car_center_x - car_width * 0.20, car_top + car_height * 0.10),
 			Vector2(car_center_x + car_width * 0.20, car_top + car_height * 0.10),
-			Vector2(car_center_x + car_width * 0.32, car_top + car_height * 0.25),
-			Vector2(car_center_x + car_width * 0.43, car_top + car_height * 0.54),
-			Vector2(car_center_x + car_width * 0.48, car_bottom)
+			Vector2(car_center_x + car_width * 0.34, car_top + car_height * 0.37),
+			Vector2(car_center_x + car_width * 0.47, car_top + car_height * 0.59),
+			Vector2(car_center_x + car_width * 0.50, car_bottom)
 		]),
 		CAR_BODY_COLOR
 	)
-
-	# Luneta, brillo y luces traseras.
 	draw_colored_polygon(
 		PackedVector2Array([
-			Vector2(car_center_x - car_width * 0.18, car_top + car_height * 0.15),
-			Vector2(car_center_x + car_width * 0.18, car_top + car_height * 0.15),
-			Vector2(car_center_x + car_width * 0.29, car_top + car_height * 0.42),
-			Vector2(car_center_x - car_width * 0.29, car_top + car_height * 0.42)
+			Vector2(car_center_x - car_width * 0.48, car_bottom),
+			Vector2(car_center_x - car_width * 0.43, car_top + car_height * 0.70),
+			Vector2(car_center_x + car_width * 0.43, car_top + car_height * 0.70),
+			Vector2(car_center_x + car_width * 0.48, car_bottom)
+		]),
+		Color("#ab2434")
+	)
+
+	# Luneta, nervio central y brillo de pintura.
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(car_center_x - car_width * 0.19, car_top + car_height * 0.15),
+			Vector2(car_center_x + car_width * 0.19, car_top + car_height * 0.15),
+			Vector2(car_center_x + car_width * 0.30, car_top + car_height * 0.43),
+			Vector2(car_center_x - car_width * 0.30, car_top + car_height * 0.43)
 		]),
 		CAR_WINDOW_COLOR
 	)
-	draw_rect(
-		Rect2(car_center_x - car_width * 0.38, car_top + car_height * 0.62, car_width * 0.18, car_height * 0.07),
-		CAR_LIGHT_COLOR
-	)
-	draw_rect(
-		Rect2(car_center_x + car_width * 0.20, car_top + car_height * 0.62, car_width * 0.18, car_height * 0.07),
-		CAR_LIGHT_COLOR
-	)
-	draw_rect(
-		Rect2(car_center_x - car_width * 0.20, car_top + car_height * 0.55, car_width * 0.40, car_height * 0.035),
-		CAR_HIGHLIGHT_COLOR
-	)
+	draw_line(Vector2(car_center_x, car_top + car_height * 0.16), Vector2(car_center_x, car_top + car_height * 0.92), CAR_HIGHLIGHT_COLOR, maxf(2.0, car_width * 0.025))
+	draw_line(Vector2(car_center_x - car_width * 0.31, car_top + car_height * 0.53), Vector2(car_center_x + car_width * 0.31, car_top + car_height * 0.53), CAR_HIGHLIGHT_COLOR, maxf(2.0, car_width * 0.025))
+
+	# Pilotos, matrícula y difusor oscuro.
+	draw_rect(Rect2(car_center_x - car_width * 0.40, car_top + car_height * 0.66, car_width * 0.16, car_height * 0.075), CAR_LIGHT_COLOR)
+	draw_rect(Rect2(car_center_x + car_width * 0.24, car_top + car_height * 0.66, car_width * 0.16, car_height * 0.075), CAR_LIGHT_COLOR)
+	draw_rect(Rect2(car_center_x - car_width * 0.12, car_top + car_height * 0.72, car_width * 0.24, car_height * 0.07), Color("#f1dca2"))
+	draw_rect(Rect2(car_center_x - car_width * 0.30, car_bottom - car_height * 0.08, car_width * 0.60, car_height * 0.045), Color("#272333"))
